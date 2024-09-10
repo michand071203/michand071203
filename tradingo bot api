@@ -1,0 +1,92 @@
+import alpaca_trade_api as tradeapi
+import numpy as np
+import pandas as pd
+import yfinance as yf
+import datetime as dt
+import time
+
+# Alpaca API credentials
+API_KEY = 'your_api_key'
+API_SECRET = 'your_api_secret'
+BASE_URL = 'https://paper-api.alpaca.markets'  # Use 'https://api.alpaca.markets' for live trading
+
+# Initialize Alpaca API
+api = tradeapi.REST(API_KEY, API_SECRET, BASE_URL, api_version='v2')
+
+# Parameters
+ticker = 'AAPL'
+short_window = 40
+long_window = 100
+start_date = '2023-01-01'
+end_date = dt.datetime.today().strftime('%Y-%m-%d')
+initial_balance = 10000
+
+def get_historical_data(symbol, start_date, end_date):
+    data = yf.download(symbol, start=start_date, end=end_date)
+    return data
+
+def place_order(symbol, qty, side, order_type='market', time_in_force='gtc'):
+    api.submit_order(
+        symbol=symbol,
+        qty=qty,
+        side=side,
+        type=order_type,
+        time_in_force=time_in_force
+    )
+    print(f"{side.capitalize()} {qty} shares of {symbol}")
+
+# Fetch historical data
+data = get_historical_data(ticker, start_date, end_date)
+
+# Calculate moving averages
+data['SMA_short'] = data['Close'].rolling(window=short_window, min_periods=1).mean()
+data['SMA_long'] = data['Close'].rolling(window=long_window, min_periods=1).mean()
+
+# Initialize signals
+data['Signal'] = 0
+data['Signal'][short_window:] = np.where(data['SMA_short'][short_window:] > data['SMA_long'][short_window:], 1, 0)
+data['Position'] = data['Signal'].diff()
+
+# Initialize trading variables
+balance = initial_balance
+position = 0
+
+# Real-time trading loop
+while True:
+    try:
+        # Get the latest market data
+        latest_data = api.get_barset(ticker, 'minute', limit=long_window).df[ticker]
+        latest_data['SMA_short'] = latest_data['close'].rolling(window=short_window, min_periods=1).mean()
+        latest_data['SMA_long'] = latest_data['close'].rolling(window=long_window, min_periods=1).mean()
+
+        # Determine the latest signals
+        if latest_data['SMA_short'].iloc[-1] > latest_data['SMA_long'].iloc[-1] and position == 0:
+            qty = balance // latest_data['close'].iloc[-1]
+            place_order(ticker, qty, 'buy')
+            position += qty
+            balance -= qty * latest_data['close'].iloc[-1]
+
+        elif latest_data['SMA_short'].iloc[-1] < latest_data['SMA_long'].iloc[-1] and position > 0:
+            place_order(ticker, position, 'sell')
+            balance += position * latest_data['close'].iloc[-1]
+            position = 0
+
+        # Print current balance and positions
+        print(f"Current balance: ${balance:.2f}, Position: {position} shares")
+
+        # Wait before the next check (e.g., 1 minute)
+        time.sleep(60)
+
+    except KeyboardInterrupt:
+        print("\nTrading session ended.")
+        break
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        break
+
+# Final balance and profit calculation
+final_balance = balance + position * latest_data['close'].iloc[-1]
+profit = final_balance - initial_balance
+print(f"\nFinal balance: ${final_balance:.2f}")
+print(f"Profit: ${profit:.2f}")
