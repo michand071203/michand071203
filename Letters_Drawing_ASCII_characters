@@ -1,0 +1,44 @@
+import requests
+from PIL import Image
+from io import BytesIO
+
+# URL of the panda image
+image_url = ["https://howtodrawforkids.com/wp-content/uploads/2023/05/9-how-to-draw-a-realistic-baby-panda.jpg","https://img.freepik.com/premium-photo/cute-little-bunny-kawaii_42136-399.jpg", "https://static.vecteezy.com/system/resources/previews/017/048/066/non_2x/cute-chibi-dinosaur-illustration-dinosaur-kawaii-drawing-style-dinosaur-cartoon-vector.jpg"]
+
+headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36'
+}
+for i in range(len(image_url)):
+    try:
+        # Fetch and load the image
+        response = requests.get(image_url[i], headers=headers)
+        response.raise_for_status()  # Check if the request was successful
+        img = Image.open(BytesIO(response.content))
+
+        # Resize image for better visibility in ASCII
+        width, height = img.size
+        aspect_ratio = height / float(width)
+        new_width = 150
+        new_height = int(aspect_ratio * new_width * 0.55)
+        img = img.resize((new_width, new_height))
+        img = img.convert('L')  # Convert to grayscale
+
+        # ASCII characters used to build the output
+        ASCII_CHARS = "@%#*+=-:.!$^ "
+
+        def pixel_to_ascii(pixel_value):
+            return ASCII_CHARS[pixel_value // 32]
+
+        # Generate ASCII art
+        ascii_str = ""
+        for y in range(new_height):
+            for x in range(new_width):
+                ascii_str += pixel_to_ascii(img.getpixel((x, y)))
+            ascii_str += "\n"
+
+        # Print the ASCII art
+        print(ascii_str)
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching the image: {e}")
+    except IOError as e:
+        print(f"Error opening the image: {e}")
