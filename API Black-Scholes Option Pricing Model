@@ -1,0 +1,130 @@
+import numpy as np
+import scipy.stats as stats
+import yfinance as yf
+from datetime import datetime
+
+# ========================
+# Black-Scholes Model
+# ========================
+class BlackScholes:
+    @staticmethod
+    def calculate_d1(S, K, T, r, sigma):
+        """Calculate d1 for Black-Scholes formula."""
+        return (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+
+    @staticmethod
+    def calculate_d2(d1, sigma, T):
+        """Calculate d2 for Black-Scholes formula."""
+        return d1 - sigma * np.sqrt(T)
+
+    @staticmethod
+    def call_price(S, K, T, r, sigma):
+        """Calculate European call option price."""
+        d1 = BlackScholes.calculate_d1(S, K, T, r, sigma)
+        d2 = BlackScholes.calculate_d2(d1, sigma, T)
+        return S * stats.norm.cdf(d1) - K * np.exp(-r * T) * stats.norm.cdf(d2)
+
+    @staticmethod
+    def put_price(S, K, T, r, sigma):
+        """Calculate European put option price."""
+        d1 = BlackScholes.calculate_d1(S, K, T, r, sigma)
+        d2 = BlackScholes.calculate_d2(d1, sigma, T)
+        return K * np.exp(-r * T) * stats.norm.cdf(-d2) - S * stats.norm.cdf(-d1)
+
+    @staticmethod
+    def calculate_greeks(S, K, T, r, sigma):
+        """Calculate option Greeks: Delta, Gamma, Theta, Vega, Rho."""
+        d1 = BlackScholes.calculate_d1(S, K, T, r, sigma)
+        d2 = BlackScholes.calculate_d2(d1, sigma, T)
+        
+        delta_call = stats.norm.cdf(d1)
+        delta_put = delta_call - 1
+        
+        gamma = stats.norm.pdf(d1) / (S * sigma * np.sqrt(T))
+        
+        theta_call = - (S * stats.norm.pdf(d1) * sigma) / (2 * np.sqrt(T)) - r * K * np.exp(-r * T) * stats.norm.cdf(d2)
+        theta_put = - (S * stats.norm.pdf(d1) * sigma) / (2 * np.sqrt(T)) + r * K * np.exp(-r * T) * stats.norm.cdf(-d2)
+        
+        vega = S * stats.norm.pdf(d1) * np.sqrt(T)
+        
+        rho_call = K * T * np.exp(-r * T) * stats.norm.cdf(d2)
+        rho_put = -K * T * np.exp(-r * T) * stats.norm.cdf(-d2)
+        
+        return {
+            "delta_call": delta_call,
+            "delta_put": delta_put,
+            "gamma": gamma,
+            "theta_call": theta_call,
+            "theta_put": theta_put,
+            "vega": vega,
+            "rho_call": rho_call,
+            "rho_put": rho_put
+        }
+
+    @staticmethod
+    def implied_volatility(option_price, S, K, T, r, option_type="call", max_iterations=100, tolerance=1e-6):
+        """Calculate implied volatility using Newton-Raphson method."""
+        sigma = 0.5  # Initial guess
+        for _ in range(max_iterations):
+            if option_type == "call":
+                price = BlackScholes.call_price(S, K, T, r, sigma)
+                vega = S * stats.norm.pdf(BlackScholes.calculate_d1(S, K, T, r, sigma)) * np.sqrt(T)
+            else:
+                price = BlackScholes.put_price(S, K, T, r, sigma)
+                vega = S * stats.norm.pdf(BlackScholes.calculate_d1(S, K, T, r, sigma)) * np.sqrt(T)
+            
+            diff = option_price - price
+            if abs(diff) < tolerance:
+                return sigma
+            sigma += diff / vega
+        return sigma  # Return best estimate if convergence fails
+
+# ========================
+# Fetch Option Data
+# ========================
+def fetch_option_chain(ticker, expiration_date=None):
+    """Fetch option chain data using yfinance."""
+    stock = yf.Ticker(ticker)
+    if expiration_date:
+        options = stock.option_chain(expiration_date)
+    else:
+        options = stock.option_chain(stock.options[0])  # Use nearest expiration
+    return options.calls, options.puts
+
+# ========================
+# Example Usage
+# ========================
+if __name__ == "__main__":
+    # Parameters
+    ticker = "AAPL"  # Example: Apple Inc.
+    risk_free_rate = 0.01  # Assume 1% risk-free rate
+    expiration_date = "2024-01-19"  # Example expiration date
+
+    # Fetch option chain data
+    calls, puts = fetch_option_chain(ticker, expiration_date)
+    print(f"Fetched {len(calls)} call options and {len(puts)} put options for {ticker} expiring on {expiration_date}.")
+
+    # Example: Analyze the first call option
+    option = calls.iloc[0]
+    S = yf.Ticker(ticker).history(period="1d")["Close"].iloc[-1]  # Current stock price
+    K = option["strike"]  # Strike price
+    T = (datetime.strptime(expiration_date, "%Y-%m-%d") - datetime.now()).days / 365  # Time to expiration in years
+    sigma = option["impliedVolatility"]  # Implied volatility from the option chain
+
+    # Calculate theoretical price
+    call_price = BlackScholes.call_price(S, K, T, risk_free_rate, sigma)
+    put_price = BlackScholes.put_price(S, K, T, risk_free_rate, sigma)
+
+    # Calculate Greeks
+    greeks = BlackScholes.calculate_greeks(S, K, T, risk_free_rate, sigma)
+
+    # Output results
+    print(f"\nStock Price (S): {S:.2f}")
+    print(f"Strike Price (K): {K:.2f}")
+    print(f"Time to Expiration (T): {T:.2f} years")
+    print(f"Implied Volatility (σ): {sigma:.4f}")
+    print(f"\nTheoretical Call Price: {call_price:.2f}")
+    print(f"Theoretical Put Price: {put_price:.2f}")
+    print("\nGreeks:")
+    for key, value in greeks.items():
+        print(f"{key}: {value:.4f}")
